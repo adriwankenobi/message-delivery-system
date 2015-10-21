@@ -4,51 +4,74 @@ import (
     "testing"
     "time"
     "message-delivery-system/src/client"
+    "message-delivery-system/src/utils"
 )
 
 /**
 	CONFIG
 */
-const (
-    CONN_HOST = "localhost"
-    CONN_PORT = "3333"
-    CONN_TYPE = "tcp"
-)
+const CONN_HOST = "localhost"
+var CONN_LADDR = utils.GetLaddrFreeTCPPort(CONN_HOST)
 
 func TestEcho(t *testing.T) {
-
-	// Run hub
+	
+	// Initialize the hub
+	hub := new(TcpMessageHub)
+	
+	// Schedule cleaning up
+	defer hub.Stop()
+	
+	// Start the hub
 	go func() {
-		err := Run(CONN_TYPE, CONN_HOST, CONN_PORT)
+		err := hub.Start(CONN_LADDR)
 	
 		if err != nil {
 			t.Error("Server failed to run")
 		}
 	}()
 	
-	// Give the hub some time
-	time.Sleep(1000 * time.Millisecond)
+	// Give the hub some time to start
+	time.Sleep(time.Second)
 	
-	// Create a client
-	conn, err := client.Connect(CONN_TYPE, CONN_HOST, CONN_PORT)
+	// Start 5 clients
+	for i := 0; i < 5; i++ {
+		go func(id int) {
+		
+			// Initialize the client
+			cli := new(client.TcpMessageClient)
 	
-	if err != nil {
-		t.Error("Client failed to connect")
-	}
+			// Connect to the hub
+			err := cli.Connect(CONN_LADDR)
 	
-	// Build message
-	request := "example text"
-	expectedResponse := "echo " + request; 
+			if err != nil {
+				t.Error("Client failed to connect")
+			}
+			
+			// Send 5 messages
+			for i := 0; i < 5; i++ {
+			
+				// Build message
+				request := "ping"
+				expectedResponse := "echo " + request; 
+				
+				// Send request and get response
+				response, err := cli.SendAndGet(request)
+				
+				if err != nil {
+					t.Error("Client failed")
+				}
+				
+				if response != expectedResponse  {
+					t.Error("Reponse and expected response don't match")
+				}
+				
+				// Wait a bit for the next message
+				time.Sleep(100 * time.Millisecond)
+			}	
+			
+		}(i)
+	}		
 	
-	// Send and receive text
-	response, err := client.Send(conn, request)
-	
-	if err != nil {
-		t.Error("Client failed to send text")
-	}
-	
-	if response != expectedResponse  {
-		t.Error("Server didn't response the echo message")
-	}
+	// Wait for the clients to complete
+	time.Sleep(2 * time.Second)
 }
-
