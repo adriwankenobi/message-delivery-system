@@ -3,6 +3,8 @@ package client
 import (
 	"fmt"
     "net"
+    "message-delivery-system/src/messages"
+    "message-delivery-system/src/utils"
 )
 
 /** 
@@ -13,8 +15,14 @@ type MessageClient interface {
 	// Connect to the hub listening on the specified address
 	Connect(laddr string) error
 	
-	// Stop stops the server
-	SendAndGet(request string) (string, error)
+	// Echo message
+	Echo(text string) (string, error)
+	
+	// Identity message
+	Identity() (uint64, error)
+	
+	// List message
+	//List() ([]uint64, error)
 }
 
 /** 
@@ -53,29 +61,69 @@ func (t *TcpMessageClient) Connect(laddr string) error {
 }
 
 /**
-	SENDS REQUEST AND GETS THE RESPONSE
+	ECHO REQUEST
 */
-func (t *TcpMessageClient) SendAndGet(request string) (string, error) {
+func (t *TcpMessageClient) Echo(text string) (string, error) {
+	
+	request := message.EchoRequest{text}
+	response, err := t.sendRequest(request)
+	
+	return response.(message.EchoResponse).Text, err
+}
+
+/**
+	ID REQUEST
+*/
+func (t *TcpMessageClient) Identity() (uint64, error) {
+	
+	request := message.IdRequest{}
+	response, err := t.sendRequest(request)
+	
+	return response.(message.IdResponse).Id, err
+}
+
+/**
+	LIST REQUEST
+*/
+func (t *TcpMessageClient) List() ([]uint64, error) {
+	
+	request := message.ListRequest{}
+	response, err := t.sendRequest(request)
+	
+	return response.(message.ListResponse).List, err
+}
+
+/**
+	SEND REQUEST
+*/
+func (t *TcpMessageClient) sendRequest(request message.Message) (message.Message, error) {
+	
+	// Encode request
+	encoded := message.Encode(request)
 	
 	// Send request
-	fmt.Fprintf(t.conn, request)
+	err := utils.Write(t.conn, encoded)
 	
-	// Get response
-	// Make a buffer (1024KB) to hold incoming data
-	buf := make([]byte, 1024000)
-	
-	// Read the incoming connection into the buffer
-	bytesRead, err := t.conn.Read(buf)
-	
-	if err != nil {
-		fmt.Println("Error reading:", err.Error())
-		return "", err
+	if err != nil { 
+		fmt.Println("Error sending request:", err.Error())
+		return nil, err
 	}
 	
-	// Build the message
-	message := string(buf[:bytesRead])
+	// Get response
+	response, err := utils.Read(t.conn)
 	
-	fmt.Println("Received message from hub:", message)
+	if err != nil {
+		fmt.Println("Error reading response:", err.Error())
+		return nil, err
+	}
 	
-	return message, nil
+	// Decode response
+	decoded, err := message.Decode(response)
+		
+	if err != nil {
+		fmt.Println("Error decoding response:", err.Error())
+		return nil, err
+	}
+	
+	return decoded, nil
 }

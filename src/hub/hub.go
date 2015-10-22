@@ -3,7 +3,10 @@ package hub
 import (
     "fmt"
     "net"
+    "errors"
     "message-delivery-system/src/utils"
+    "message-delivery-system/src/messages"
+    "message-delivery-system/src/services"
 )
 
 /** 
@@ -15,7 +18,7 @@ type MessageHub interface {
 	Start(laddr string) error
 	
 	// ClientIDs Returns client ids for the currently connected clients
-	//ClientIDs() []uint64
+	ClientIDs() []uint64
 	
 	// Stop stops the server
 	Stop() error
@@ -39,6 +42,9 @@ type TcpMessageHub struct {
 	
 	// quit channel
 	quit chan bool
+	
+	// connected
+	running bool
 }
 
 /**
@@ -46,69 +52,117 @@ type TcpMessageHub struct {
 */
 func (t *TcpMessageHub) Start(laddr string) error {
 
-    fmt.Println("Starting hub server...")
-    
-	// Listen for incoming connections
-	ln, err := net.Listen(CONN_TYPE, laddr)
+	if t.isRunning() {
 	
-	if err != nil {
-		fmt.Println("Error listening:", err.Error())
-		return err
-	}
-    
-    t.laddr = laddr
-	t.ln = ln
-	t.conns = make(map[uint64]net.Conn)
-	t.quit = make(chan bool)
-	
-	// Schedule gracefull shutdown
-	defer t.Stop()
-	
-	fmt.Println("Listening on", laddr)
-    
-	for {
-		// Accept an incoming connection
-		conn, err := ln.Accept()
-
-		if err != nil {
-			fmt.Println("Error accepting:", err.Error())
-			
-			// Continuing accepting connections unless quit signal is sent through channel
-			select {
-			case <- t.quit:
-				return nil
-			default:
-			}
-			
-			continue
-		}
-        
-        // Generate unique id and add connection to the pool
-        id := utils.NextId()
-		t.conns[id] = conn
+		fmt.Println("Hub server is already running")
+		return nil
 		
-		// Handle connections in a new goroutine
-		go t.handleRequest(id)
+	} else {
+	
+	    fmt.Println("Starting hub server...")
+	    
+		// Listen for incoming connections
+		ln, err := net.Listen(CONN_TYPE, laddr)
+		
+		if err != nil {
+			fmt.Println("Error listening:", err.Error())
+			return err
+		}
+	    
+		// Schedule gracefull shutdown
+		defer t.Stop()
+		
+		fmt.Println("Listening on", laddr)
+		
+		t.laddr = laddr
+		t.ln = ln
+		t.conns = make(map[uint64]net.Conn)
+		t.quit = make(chan bool)
+		t.running = true
+	    
+		for {
+			// Accept an incoming connection
+			conn, err := ln.Accept()
+	
+			if err != nil {
+				fmt.Println("Error accepting:", err.Error())
+				
+				// Continuing accepting connections unless quit signal is sent through channel
+				select {
+				case <- t.quit:
+					return nil
+				default:
+				}
+				
+				continue
+			}
+	        
+	        // Generate unique id and add connection to the pool
+	        id := utils.NextId()
+			t.conns[id] = conn
+			
+			// Handle connections in a new goroutine
+			go t.handleRequest(id)
+		}
 	}
 }
 
+/**
+	RETURNS CONNECTED CLIENTS
+*/
+func (t *TcpMessageHub) ClientIDs() []uint64 {
+	var list []uint64
+	for id, _ := range t.conns {
+		list = append(list, id)
+	}
+	return list
+}
+
+/**
+	STOPS THE HUB
+*/
 func (t *TcpMessageHub) Stop() error {
 
-	fmt.Println("Shutting down hub server...")
+	if !t.isRunning() {
 	
-	// Send quit signal
-	close(t.quit)
+		fmt.Println("Hub server is already stopped")
+		return nil
+		
+	} else {
 	
-	for id, conn := range t.conns {
-		if conn != nil {
-			fmt.Println("Closing connection", id)
-			conn.Close()
-			delete(t.conns, id)
+		fmt.Println("Shutting down hub server...")
+		
+		// Send quit signal
+		close(t.quit)
+		
+		for id, conn := range t.conns {
+			if conn != nil {
+				fmt.Println("Closing connection", id)
+				err := conn.Close()
+				if err != nil {
+					return err
+				}
+				delete(t.conns, id)
+			}
+		}
+		
+		fmt.Println("Closing listener")
+		
+		err := t.ln.Close()
+		if err != nil {
+			return err
+		} else {
+			t.running = false
+			return nil
 		}
 	}
-	
-	fmt.Println("Closing listener")
-	return t.ln.Close()
+}
+
+/**
+	IS RUNNING
+*/
+func (t *TcpMessageHub) isRunning() bool {
+	return t.running
 }
 
 /**
@@ -117,28 +171,48 @@ func (t *TcpMessageHub) Stop() error {
 func (t *TcpMessageHub) handleRequest(id uint64) error {
 	
 	for {
-	
-		// Make a buffer (1024KB) to hold incoming data
-		buf := make([]byte, 1024000)
 		
-		// Read the incoming connection into the buffer
-		bytesRead, err := t.conns[id].Read(buf)
+		// Read request
+		request, err := utils.Read(t.conns[id])
 		
 		if err != nil {
-			fmt.Println("Hub error reading:", err.Error())
+			fmt.Println("Error reading request:", err.Error())
 			return err
 		}
 		
-		// Build the message
-		message := string(buf[:bytesRead])
+		// Decode request
+		decoded, err := message.Decode(request)
 		
-		fmt.Println("Received message from client:", message)
+		if err != nil {
+			fmt.Println("Error decoding request:", err.Error())
+			return err
+		}
 		
-		// Build the response
-		response := "echo " + message
+		// Handle request and build response
+		var response message.Message
+		switch decoded.GetMessageType() {
+	    case message.EchoRequestMessage:
+	        response = services.HandleEcho(decoded.(message.EchoRequest))
+	    case message.IdRequestMessage:
+	        response = services.HandleId(decoded.(message.IdRequest), id)
+	    case message.ListRequestMessage:
+	        response = services.HandleList(decoded.(message.ListRequest), id, t.ClientIDs())
+	    default:
+	    	err := errors.New("Error handling: Cannot find handler for this message type")
+	    	return err
+	    }
+		
+		// Encode response
+		encoded := message.Encode(response)
 		
 		// Send the response
-		t.conns[id].Write([]byte(response))
+		err = utils.Write(t.conns[id], encoded)
+		
+		if err != nil { 
+			fmt.Println("Error sending response:", err.Error())
+			return err
+		}
+
 	}
 	
 	return nil
