@@ -3,10 +3,10 @@ Simple message delivery system
 
 - Trying Go language! I like it so far!
 - TCP server accepting (using a simple client for testing purposes)
-1- Echo message
-2- Identify yourself
-3- List clients connected
-4- Relay message to other clients (up to 1024KB binary-encoded payload and 255 clients)
+- 1 - Echo message
+- 2 - Identify yourself
+- 3 - List clients connected
+- 4 - Relay message to other clients (up to 1024KB binary-encoded payload and 255 clients)
 
 # TODO
 - Generic encoding function for Relay message
