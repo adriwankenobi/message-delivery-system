@@ -22,7 +22,10 @@ type MessageClient interface {
 	Identity() (uint64, error)
 	
 	// List message
-	//List() ([]uint64, error)
+	List() ([]uint64, error)
+	
+	// Relay message
+	Relay(receivers []uint64, payload []byte)
 }
 
 /** 
@@ -65,10 +68,11 @@ func (t *TcpMessageClient) Connect(laddr string) error {
 */
 func (t *TcpMessageClient) Echo(text string) (string, error) {
 	
-	request := message.EchoRequest{text}
-	response, err := t.sendRequest(request)
+	request := messages.EchoRequest{text}
+	t.sendRequest(request)
+	response, err := t.WaitForResponse()
 	
-	return response.(message.EchoResponse).Text, err
+	return response.(messages.EchoResponse).Text, err
 }
 
 /**
@@ -76,10 +80,11 @@ func (t *TcpMessageClient) Echo(text string) (string, error) {
 */
 func (t *TcpMessageClient) Identity() (uint64, error) {
 	
-	request := message.IdRequest{}
-	response, err := t.sendRequest(request)
+	request := messages.IdRequest{}
+	t.sendRequest(request)
+	response, err := t.WaitForResponse()
 	
-	return response.(message.IdResponse).Id, err
+	return response.(messages.IdResponse).Id, err
 }
 
 /**
@@ -87,30 +92,50 @@ func (t *TcpMessageClient) Identity() (uint64, error) {
 */
 func (t *TcpMessageClient) List() ([]uint64, error) {
 	
-	request := message.ListRequest{}
-	response, err := t.sendRequest(request)
+	request := messages.ListRequest{}
+	t.sendRequest(request)
+	response, err := t.WaitForResponse()
 	
-	return response.(message.ListResponse).List, err
+	return response.(messages.ListResponse).List, err
+}
+
+/**
+	RELAY REQUEST
+*/
+func (t *TcpMessageClient) Relay(receivers []uint64, payload []byte) {
+	
+	request := messages.RelayRequest{receivers, payload}
+	t.sendRequest(request)
 }
 
 /**
 	SEND REQUEST
 */
-func (t *TcpMessageClient) sendRequest(request message.Message) (message.Message, error) {
+func (t *TcpMessageClient) sendRequest(request messages.Message) error {
 	
 	// Encode request
-	encoded := message.Encode(request)
+	encoded := messages.Encode(request)
 	
 	// Send request
 	err := utils.Write(t.conn, encoded)
 	
 	if err != nil { 
 		fmt.Println("Error sending request:", err.Error())
-		return nil, err
+		return err
 	}
+	
+	return nil
+}
+
+/**
+	WAIT FOR RESPONSE
+*/
+func (t *TcpMessageClient) WaitForResponse() (messages.Response, error) {
 	
 	// Get response
 	response, err := utils.Read(t.conn)
+	
+	fmt.Println("Response from hub:", string(response))
 	
 	if err != nil {
 		fmt.Println("Error reading response:", err.Error())
@@ -118,12 +143,12 @@ func (t *TcpMessageClient) sendRequest(request message.Message) (message.Message
 	}
 	
 	// Decode response
-	decoded, err := message.Decode(response)
+	decoded, err := messages.Decode(response)
 		
 	if err != nil {
 		fmt.Println("Error decoding response:", err.Error())
 		return nil, err
 	}
 	
-	return decoded, nil
+	return decoded.(messages.Response), nil
 }

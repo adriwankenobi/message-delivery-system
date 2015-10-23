@@ -4,20 +4,24 @@ import (
 	"message-delivery-system/src/messages"
 )
 
-func HandleEcho(request message.EchoRequest) message.EchoResponse {
-	return message.EchoResponse{request.Text}
+func HandleEcho(request messages.EchoRequest, id uint64) messages.EchoResponse {
+	return messages.EchoResponse{request.Text, id}
 }
 
-func HandleId(request message.IdRequest, id uint64) message.IdResponse {
-	return message.IdResponse{id}
+func HandleId(request messages.IdRequest, id uint64) messages.IdResponse {
+	return messages.IdResponse{id, id}
 }
 
-func HandleList(request message.ListRequest, id uint64, clients []uint64) message.ListResponse {
+func HandleList(request messages.ListRequest, id uint64, clients []uint64) messages.ListResponse {
 	var list []uint64
 	for _, someId := range clients {
 		if someId != id {
 			list = append(list, someId)
 		}
 	}
-	return message.ListResponse{list}
+	return messages.ListResponse{list, id}
+}
+
+func HandleRelay(request messages.RelayRequest) messages.RelayResponse {
+	return messages.RelayResponse{request.Body, request.Receivers}
 }

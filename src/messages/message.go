@@ -1,4 +1,4 @@
-package message
+package messages
 
 import (
 	"strconv"
@@ -31,7 +31,17 @@ type Message interface {
 	
 	// Gets the binary data
 	GetData() []byte
+}
+
+/**
+	RESPONSE
+*/
+type Response interface {
+
+	Message
 	
+	// Gets the receivers of the message
+	GetReceiverIds() []uint64
 }
 
 const DELIM = "#"
@@ -87,6 +97,10 @@ func Decode(encoded []byte) (Message, error) {
         message = NewListRequest(messageData)
     case ListResponseMessage:
         message = NewListResponse(messageData)
+    case RelayRequestMessage:
+        message = NewRelayRequest(messageData)
+    case RelayResponseMessage:
+        message = NewRelayResponse(messageData)    
     default:
     	err := errors.New("Cannot decode message: wrong type")
     	return nil, err
@@ -94,10 +108,3 @@ func Decode(encoded []byte) (Message, error) {
     
 	return message, nil
 }
-
-
-
-
-
-// MessageEncoder defines the message encoder
-type MessageEncoder func(receivers []uint64, payload []byte) []byte

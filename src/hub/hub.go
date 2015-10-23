@@ -4,6 +4,7 @@ import (
     "fmt"
     "net"
     "errors"
+    "io"
     "message-delivery-system/src/utils"
     "message-delivery-system/src/messages"
     "message-delivery-system/src/services"
@@ -174,14 +175,19 @@ func (t *TcpMessageHub) handleRequest(id uint64) error {
 		
 		// Read request
 		request, err := utils.Read(t.conns[id])
-		
+
 		if err != nil {
+			if err == io.EOF {
+				break
+			}
 			fmt.Println("Error reading request:", err.Error())
 			return err
 		}
 		
+		fmt.Println("Request from client:", string(request))
+		
 		// Decode request
-		decoded, err := message.Decode(request)
+		decoded, err := messages.Decode(request)
 		
 		if err != nil {
 			fmt.Println("Error decoding request:", err.Error())
@@ -189,31 +195,43 @@ func (t *TcpMessageHub) handleRequest(id uint64) error {
 		}
 		
 		// Handle request and build response
-		var response message.Message
+		var response messages.Response
 		switch decoded.GetMessageType() {
-	    case message.EchoRequestMessage:
-	        response = services.HandleEcho(decoded.(message.EchoRequest))
-	    case message.IdRequestMessage:
-	        response = services.HandleId(decoded.(message.IdRequest), id)
-	    case message.ListRequestMessage:
-	        response = services.HandleList(decoded.(message.ListRequest), id, t.ClientIDs())
+	    case messages.EchoRequestMessage:
+	        response = services.HandleEcho(decoded.(messages.EchoRequest), id)
+	    case messages.IdRequestMessage:
+	        response = services.HandleId(decoded.(messages.IdRequest), id)
+	    case messages.ListRequestMessage:
+	        response = services.HandleList(decoded.(messages.ListRequest), id, t.ClientIDs())
+	    case messages.RelayRequestMessage:
+	        response = services.HandleRelay(decoded.(messages.RelayRequest))
 	    default:
 	    	err := errors.New("Error handling: Cannot find handler for this message type")
 	    	return err
 	    }
 		
-		// Encode response
-		encoded := message.Encode(response)
-		
-		// Send the response
-		err = utils.Write(t.conns[id], encoded)
+		t.handleResponse(response)
+
+	}
+	
+	return nil
+}
+
+func (t *TcpMessageHub) handleResponse(response messages.Response) error {
+
+	// Encode response
+	encoded := messages.Encode(response)
+	
+	// Send the responses
+	for _, id := range response.GetReceiverIds() {
+
+		err := utils.Write(t.conns[id], encoded)
 		
 		if err != nil { 
 			fmt.Println("Error sending response:", err.Error())
 			return err
 		}
-
 	}
-	
+
 	return nil
 }
